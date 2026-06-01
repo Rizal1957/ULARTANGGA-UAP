@@ -1,0 +1,1370 @@
+import javax.swing.*;
+import javax.swing.border.*;
+import java.awt.*;
+import java.awt.event.*;
+import java.awt.geom.*;
+import java.util.*;
+import java.util.List;
+import javax.sound.sampled.AudioInputStream;
+import javax.sound.sampled.AudioSystem;
+import javax.sound.sampled.Clip;
+import java.io.File;
+import java.net.URL;
+
+public class UAP_REVO2 {
+    static JFrame mainFrame;
+    public static JCheckBox chkSoundGlobal; // Untuk menyimpan status sound secara global
+    public static javax.sound.sampled.Clip backgroundMusic;
+// ============================================================
+    // ENUM
+    // ============================================================
+ 
+    enum CellType {
+        NORMAL, SNAKE_HEAD, SNAKE_TAIL, LADDER_START, LADDER_END
+    }
+ 
+    enum GameStatus {
+        WAITING, RUNNING, FINISHED
+    }
+ 
+    enum EffectType {
+        NONE, SNAKE, LADDER
+    }
+ 
+    // ============================================================
+    // MODEL: Player
+    // ============================================================
+ 
+    static class Player {
+        String name;
+        int position;      
+        Color color;
+        boolean winner;
+        int turnCount;
+        int snakeHits;
+        int ladderClimbs;
+ 
+        public Player(String name, Color color) {
+            this.name     = name;
+            this.color    = color;
+            this.position = 0;
+            this.winner   = false;
+            this.turnCount    = 0;
+            this.snakeHits    = 0;
+            this.ladderClimbs = 0;
+        }
+ 
+        public void reset() {
+            position     = 0;
+            winner       = false;
+            turnCount    = 0;
+            snakeHits    = 0;
+            ladderClimbs = 0;
+        }
+    }
+ 
+    // ============================================================
+    // MODEL: Dice
+    // ============================================================
+ 
+    static class Dice {
+        private final Random random = new Random();
+        private int lastValue = 1;
+ 
+        public int roll() {
+            lastValue = random.nextInt(6) + 1;
+            return lastValue;
+        }
+ 
+        public int getLastValue() { return lastValue; }
+ 
+        public void reset() { lastValue = 1; }
+    }
+ 
+    // ============================================================
+    // MODEL: Cell
+    // ============================================================
+ 
+    static class Cell {
+        int number;
+        int row, col;
+        CellType type;
+        List<Player> playersHere;
+ 
+        public Cell(int number, int row, int col) {
+            this.number      = number;
+            this.row         = row;
+            this.col         = col;
+            this.type        = CellType.NORMAL;
+            this.playersHere = new ArrayList<>();
+        }
+    }
+ 
+    // ============================================================
+    // MODEL: Move (histroy)
+    // ============================================================
+ 
+    static class Move {
+        Player player;
+        int diceValue;
+        int startPos;
+        int tempPos;
+        int finalPos;
+        EffectType effectType;
+        String description;
+ 
+        public Move(Player player, int diceValue, int startPos,
+                    int tempPos, int finalPos,
+                    EffectType effectType, String description) {
+            this.player      = player;
+            this.diceValue   = diceValue;
+            this.startPos    = startPos;
+            this.tempPos     = tempPos;
+            this.finalPos    = finalPos;
+            this.effectType  = effectType;
+            this.description = description;
+        }
+    }
+ 
+    // ============================================================
+    // MODEL: GameConfig
+    // ============================================================
+ 
+    static class GameConfig {
+        int playerCount;
+        String[] playerNames;
+        boolean useCustomBoard;
+        boolean soundEnabled;
+ 
+        public GameConfig(int playerCount, String[] playerNames, boolean useCustomBoard, boolean soundEnabled) {
+            this.playerCount    = playerCount;
+            this.playerNames    = playerNames;
+            this.useCustomBoard = useCustomBoard;
+            this.soundEnabled   = soundEnabled;
+        }
+    }
+ 
+    // ============================================================
+    // MODEL: Board
+    // ============================================================
+ 
+    static class Board {
+        Map<Integer, Integer> snakes  = new LinkedHashMap<>();
+        Map<Integer, Integer> ladders = new LinkedHashMap<>();
+        Cell[][] grid = new Cell[10][10];
+ 
+        public Board(boolean useCustom) {
+            createBoard();
+            if (useCustom) createCustomSnakesAndLadders();
+            else           createSnakesAndLadders();
+        }
+ 
+        private void createBoard() {
+            for (int i = 1; i <= 100; i++) {
+                int row = (i - 1) / 10;
+                int col = (row % 2 == 0) ? (i - 1) % 10 : 9 - ((i - 1) % 10);
+                Cell cell = new Cell(i, row, col);
+                grid[row][col] = cell;
+            }
+        }
+ 
+        private void createSnakesAndLadders() {
+            snakes.put(99, 54);
+            snakes.put(70, 55);
+            snakes.put(52, 42);
+            snakes.put(25, 2);
+ 
+            for (Map.Entry<Integer, Integer> e : snakes.entrySet()) {
+                getCellByNumber(e.getKey()).type   = CellType.SNAKE_HEAD;
+                getCellByNumber(e.getValue()).type = CellType.SNAKE_TAIL;
+            }
+ 
+            ladders.put(3, 22);
+            ladders.put(15, 44);
+            ladders.put(36, 72);
+            ladders.put(61, 95);
+ 
+            for (Map.Entry<Integer, Integer> e : ladders.entrySet()) {
+                getCellByNumber(e.getKey()).type   = CellType.LADDER_START;
+                getCellByNumber(e.getValue()).type = CellType.LADDER_END;
+            }
+        }
+ 
+        private void createCustomSnakesAndLadders() {
+            snakes.put(98, 40);
+            snakes.put(85, 60);
+            snakes.put(63, 18);
+            snakes.put(48, 30);
+            snakes.put(33, 8);
+ 
+            for (Map.Entry<Integer, Integer> e : snakes.entrySet()) {
+                getCellByNumber(e.getKey()).type   = CellType.SNAKE_HEAD;
+                getCellByNumber(e.getValue()).type = CellType.SNAKE_TAIL;
+            }
+ 
+            ladders.put(5, 28);
+            ladders.put(20, 55);
+            ladders.put(41, 79);
+            ladders.put(67, 92);
+            ladders.put(10, 35);
+ 
+            for (Map.Entry<Integer, Integer> e : ladders.entrySet()) {
+                getCellByNumber(e.getKey()).type   = CellType.LADDER_START;
+                getCellByNumber(e.getValue()).type = CellType.LADDER_END;
+            }
+        }
+ 
+        public Cell getCellByNumber(int number) {
+            int row = (number - 1) / 10;
+            int col = (row % 2 == 0) ? (number - 1) % 10 : 9 - ((number - 1) % 10);
+            return grid[row][col];
+        }
+ 
+        public boolean isSnake(int pos)  { return snakes.containsKey(pos); }
+        public boolean isLadder(int pos) { return ladders.containsKey(pos); }
+ 
+        public int getDestination(int pos) {
+            if (isSnake(pos))  return snakes.get(pos);
+            if (isLadder(pos)) return ladders.get(pos);
+            return pos;
+        }
+ 
+        public Point getCoordinate(int tile) {
+            int row = (tile - 1) / 10;
+            int col = (row % 2 == 0) ? (tile - 1) % 10 : 9 - ((tile - 1) % 10);
+            int x = col * 60;
+            int y = 600 - ((row + 1) * 60);
+            return new Point(x, y);
+        }
+ 
+        public Point getCenter(int tile) {
+            Point p = getCoordinate(tile);
+            return new Point(p.x + 30, p.y + 30);
+        }
+    }
+ 
+    // ============================================================
+    // MODEL: GameState
+    // ============================================================
+ 
+    static class GameState {
+        List<Player> players  = new ArrayList<>();
+        int  currentTurn      = 0;
+        int  round            = 1;
+        GameStatus status     = GameStatus.RUNNING;
+        Player winner         = null;
+        List<Move> moveLog    = new ArrayList<>();
+ 
+        public Player getCurrentPlayer() {
+            return players.get(currentTurn);
+        }
+ 
+        public void nextTurn() {
+            currentTurn++;
+            if (currentTurn >= players.size()) {
+                currentTurn = 0;
+                round++;
+            }
+        }
+ 
+        public void addMove(Move move) {
+            moveLog.add(0, move);
+            if (moveLog.size() > 100) moveLog.remove(moveLog.size() - 1);
+        }
+ 
+        public void reset() {
+            for (Player p : players) p.reset();
+            currentTurn = 0;
+            round       = 1;
+            status      = GameStatus.RUNNING;
+            winner      = null;
+            moveLog.clear();
+        }
+    }
+ 
+    // ============================================================
+    // MAIN ENTRY POINT
+    // ============================================================
+ 
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> showMainMenu());
+    }
+ 
+    
+ 
+    static void showMainMenu() {
+        if (mainFrame != null) mainFrame.dispose();
+        mainFrame = new JFrame("Snake & Ladder Game");
+        mainFrame.setSize(1000, 700);
+        mainFrame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        mainFrame.setLocationRelativeTo(null);
+        mainFrame.setResizable(false);
+        mainFrame.setContentPane(new MainMenuPanel(mainFrame));
+        mainFrame.setVisible(true);
+    }
+ 
+    static void showConfig() {
+        mainFrame.setContentPane(new ConfigPanel(mainFrame));
+        mainFrame.revalidate();
+        mainFrame.repaint();
+    }
+ 
+    static void showGame(GameConfig config) {
+        mainFrame.setContentPane(new GamePanel(mainFrame, config));
+        mainFrame.revalidate();
+        mainFrame.repaint();
+    }
+ 
+    static void showWin(GameState state, GameConfig config) {
+        mainFrame.setContentPane(new WinPanel(mainFrame, state, config));
+        mainFrame.revalidate();
+        mainFrame.repaint();
+    }
+ 
+    // ============================================================
+    // GUI: MainMenuPanel
+    // ============================================================
+ 
+    static class MainMenuPanel extends JPanel {
+        JFrame frame;
+ 
+        public MainMenuPanel(JFrame frame) {
+            this.frame = frame;
+            setLayout(new BorderLayout());
+            setBackground(new Color(34, 139, 34));
+            build();
+        }
+ 
+        private void build() {
+            // Judul
+            JLabel title = new JLabel("ULAR TANGGA", SwingConstants.CENTER);
+            title.setFont(new Font("Arial", Font.BOLD, 52));
+            title.setForeground(Color.WHITE);
+            title.setBorder(BorderFactory.createEmptyBorder(100, 0, 10, 0));
+ 
+            JLabel sub = new JLabel("Snake & Ladder Game", SwingConstants.CENTER);
+            sub.setFont(new Font("Arial", Font.ITALIC, 20));
+            sub.setForeground(new Color(255, 255, 180));
+ 
+            JPanel titlePanel = new JPanel(new GridLayout(2, 1));
+            titlePanel.setOpaque(false);
+            titlePanel.add(title);
+            titlePanel.add(sub);
+ 
+            // Tombol
+            JButton btnPlay = makeBtn("Mulai Bermain", new Color(255, 200, 0));
+            JButton btnExit = makeBtn("Keluar",        new Color(220, 80, 80));
+ 
+            btnPlay.addActionListener(e -> showConfig());
+            btnExit.addActionListener(e -> System.exit(0));
+ 
+            JPanel btnPanel = new JPanel();
+            btnPanel.setOpaque(false);
+            btnPanel.setLayout(new BoxLayout(btnPanel, BoxLayout.Y_AXIS));
+            btnPanel.setBorder(BorderFactory.createEmptyBorder(50, 300, 100, 300));
+            btnPlay.setAlignmentX(CENTER_ALIGNMENT);
+            btnExit.setAlignmentX(CENTER_ALIGNMENT);
+            btnPanel.add(btnPlay);
+            btnPanel.add(Box.createVerticalStrut(20));
+            btnPanel.add(btnExit);
+ 
+            add(titlePanel, BorderLayout.CENTER);
+            add(btnPanel,   BorderLayout.SOUTH);
+        }
+ 
+        private JButton makeBtn(String text, Color color) {
+            JButton b = new JButton(text);
+            b.setFont(new Font("Arial", Font.BOLD, 18));
+            b.setBackground(color);
+            b.setForeground(Color.WHITE);
+            b.setFocusPainted(false);
+            b.setBorderPainted(false);
+            b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            b.setMaximumSize(new Dimension(280, 55));
+            b.setPreferredSize(new Dimension(280, 55));
+            return b;
+        }
+    }
+ 
+    // ============================================================
+    // GUI: ConfigPanel
+    // ============================================================
+ 
+    static class ConfigPanel extends JPanel {
+        JFrame frame;
+        JSpinner spinnerCount;
+        JTextField[] nameFields;
+        JPanel namePanel;
+        JCheckBox chkCustomBoard;
+        JCheckBox chkSound;
+ 
+        public ConfigPanel(JFrame frame) {
+            this.frame = frame;
+            setLayout(new BorderLayout());
+            setBackground(new Color(245, 245, 220));
+            build();
+        }
+        
+        private void playSound(String fileName) {
+        // JIKA CHECKBOX TIDAK DICENTANG, JANGAN PUTAR SUARA
+        if (chkSound != null && !chkSound.isSelected()) {
+            return; 
+        }
+
+        try {
+            java.net.URL soundURL = getClass().getResource("/sound/" + fileName);
+            javax.sound.sampled.AudioInputStream audioStream;
+            
+            if (soundURL != null) {
+                audioStream = javax.sound.sampled.AudioSystem.getAudioInputStream(soundURL);
+            } else {
+                java.io.File soundFile = new java.io.File("sound/" + fileName);
+                if (soundFile.exists()) {
+                    audioStream = javax.sound.sampled.AudioSystem.getAudioInputStream(soundFile);
+                } else {
+                    System.out.println("File suara tidak ditemukan: " + fileName);
+                    return;
+                }
+            }
+            
+            javax.sound.sampled.Clip clip = javax.sound.sampled.AudioSystem.getClip();
+            clip.open(audioStream);
+            clip.start();
+        } catch (Exception e) {
+            System.out.println("Gagal memutar suara: " + e.getMessage());
+        }
+    }
+        
+    
+
+    // =========================================================================
+    // METHOD UNTUK MEMUTAR MUSIK LATAR DENGAN PENGECEKAN CHECKBOX
+    // =========================================================================
+        
+    
+ 
+        private void build() {
+            JLabel title = new JLabel("Konfigurasi Pemain", SwingConstants.CENTER);
+            title.setFont(new Font("Arial", Font.BOLD, 28));
+            title.setBorder(BorderFactory.createEmptyBorder(30, 0, 20, 0));
+            add(title, BorderLayout.NORTH);
+ 
+            JPanel form = new JPanel();
+            form.setOpaque(false);
+            form.setLayout(new BoxLayout(form, BoxLayout.Y_AXIS));
+            form.setBorder(BorderFactory.createEmptyBorder(10, 200, 10, 200));
+ 
+            // Jumlah pemain
+            JPanel rowCount = new JPanel(new FlowLayout(FlowLayout.LEFT));
+            rowCount.setOpaque(false);
+            JLabel lblCount = new JLabel("Jumlah Pemain (2-12): ");
+            lblCount.setFont(new Font("Arial", Font.PLAIN, 16));
+            spinnerCount = new JSpinner(new SpinnerNumberModel(2, 2, 12, 1));
+            spinnerCount.setFont(new Font("Arial", Font.PLAIN, 15));
+            spinnerCount.setPreferredSize(new Dimension(70, 35));
+            rowCount.add(lblCount);
+            rowCount.add(spinnerCount);
+            spinnerCount.addChangeListener(e -> updateNames());
+ 
+            // Panel nama
+            namePanel = new JPanel();
+            namePanel.setOpaque(false);
+            namePanel.setLayout(new BoxLayout(namePanel, BoxLayout.Y_AXIS));
+ 
+            // Papan kustom
+            JPanel rowCustom = new JPanel(new FlowLayout(FlowLayout.LEFT));
+            rowCustom.setOpaque(false);
+            chkCustomBoard = new JCheckBox("Gunakan Papan Kustom (ular & tangga berbeda)");
+            chkCustomBoard.setFont(new Font("Arial", Font.PLAIN, 15));
+            chkCustomBoard.setOpaque(false);
+            rowCustom.add(chkCustomBoard);
+ 
+            // Suara
+            JPanel rowSound = new JPanel(new FlowLayout(FlowLayout.LEFT));
+            rowSound.setOpaque(false);
+            
+            // PERBAIKAN: Mengisi komponen ke variabel statik global
+            UAP_REVO2.chkSoundGlobal = new JCheckBox("Aktifkan Efek Suara (opsional)");
+            UAP_REVO2.chkSoundGlobal.setFont(new Font("Arial", Font.PLAIN, 15));
+            UAP_REVO2.chkSoundGlobal.setOpaque(false);
+            UAP_REVO2.chkSoundGlobal.setSelected(true); // Default menyala
+            
+            UAP_REVO2.chkSoundGlobal.addActionListener(e -> {
+                if (!UAP_REVO2.chkSoundGlobal.isSelected()) {
+                    stopBackgroundMusic();
+                } else {
+                    playBackgroundMusic("subway-surfers.wav");
+                }
+            });
+            
+            rowSound.add(UAP_REVO2.chkSoundGlobal);
+            form.add(rowSound);
+            form.add(rowCount);
+            form.add(Box.createVerticalStrut(15));
+            form.add(namePanel);
+            form.add(Box.createVerticalStrut(10));
+            form.add(rowCustom);
+            form.add(Box.createVerticalStrut(5));
+            form.add(rowSound);
+            add(form, BorderLayout.CENTER);
+ 
+            updateNames();
+ 
+            // Tombol bawah
+            JPanel btnRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 20, 20));
+            btnRow.setOpaque(false);
+            JButton btnBack  = makeBtn("Kembali",   new Color(150, 150, 150));
+            JButton btnStart = makeBtn("Mulai Game", new Color(34, 139, 34));
+            btnBack.addActionListener(e -> {
+                mainFrame.setContentPane(new MainMenuPanel(frame));
+                mainFrame.revalidate(); mainFrame.repaint();
+            });
+            btnStart.addActionListener(e -> startGame());
+            btnRow.add(btnBack);
+            btnRow.add(btnStart);
+            add(btnRow, BorderLayout.SOUTH);
+        }
+ 
+        private void updateNames() {
+            int count = (int) spinnerCount.getValue();
+            nameFields = new JTextField[count];
+            namePanel.removeAll();
+            String[] def = {"Pemain 1","Pemain 2","Pemain 3","Pemain 4",
+                            "Pemain 5","Pemain 6","Pemain 7","Pemain 8",
+                            "Pemain 9","Pemain 10","Pemain 11","Pemain 12"};
+            for (int i = 0; i < count; i++) {
+                JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT));
+                row.setOpaque(false);
+                JLabel lbl = new JLabel("Nama Pemain " + (i+1) + ": ");
+                lbl.setFont(new Font("Arial", Font.PLAIN, 14));
+                lbl.setPreferredSize(new Dimension(160, 28));
+                nameFields[i] = new JTextField(def[i], 14);
+                nameFields[i].setFont(new Font("Arial", Font.PLAIN, 14));
+                row.add(lbl); row.add(nameFields[i]);
+                namePanel.add(row);
+            }
+            namePanel.revalidate(); namePanel.repaint();
+        }
+ 
+        private void startGame() {
+            int count = (int) spinnerCount.getValue();
+            String[] names = new String[count];
+            for (int i = 0; i < count; i++) {
+                String n = nameFields[i].getText().trim();
+                if (n.isEmpty()) {
+                    JOptionPane.showMessageDialog(this,
+                        "Nama pemain " + (i+1) + " tidak boleh kosong!",
+                        "Peringatan", JOptionPane.WARNING_MESSAGE);
+                    return;
+                }
+                names[i] = n;
+            }
+            // Cek nama duplikat
+            for (int i = 0; i < count; i++) {
+                for (int j = i + 1; j < count; j++) {
+                    if (names[i].equalsIgnoreCase(names[j])) {
+                        JOptionPane.showMessageDialog(this,
+                            "Nama pemain " + (i+1) + " dan pemain " + (j+1) + " tidak boleh sama!",
+                            "Peringatan", JOptionPane.WARNING_MESSAGE);
+                        return;
+                    }
+                }
+            }
+            showGame(new GameConfig(count, names, chkCustomBoard.isSelected(), chkSound.isSelected()));
+        }
+ 
+        private JButton makeBtn(String text, Color color) {
+            JButton b = new JButton(text);
+            b.setFont(new Font("Arial", Font.BOLD, 16));
+            b.setBackground(color); b.setForeground(Color.WHITE);
+            b.setFocusPainted(false); b.setBorderPainted(false);
+            b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            b.setPreferredSize(new Dimension(180, 45));
+            return b;
+        }
+    }
+ 
+    // ============================================================
+    // GUI: GamePanel (main container)
+    // ============================================================
+ 
+    static class GamePanel extends JPanel {
+        JFrame frame;
+        GameConfig config;
+        Board board;
+        Dice  dice;
+        GameState gameState;
+ 
+        BoardPanel  boardPanel;
+        DicePanel   dicePanel;
+        InfoPanel   infoPanel;
+        StatsPanel  statsPanel;
+        LogPanel    logPanel;
+ 
+        boolean animationRunning = false;
+ 
+        public GamePanel(JFrame frame, GameConfig config) {
+            this.frame  = frame;
+            this.config = config;
+            this.board  = new Board(config.useCustomBoard);
+            this.dice   = new Dice();
+            this.gameState = new GameState();
+            initPlayers();
+            setLayout(new BorderLayout());
+            buildUI();
+            refresh();
+        }
+ 
+        private void initPlayers() {
+            Color[] colors = {
+                Color.RED, Color.BLUE, new Color(0,180,0), new Color(255,140,0),
+                Color.BLACK, Color.MAGENTA, Color.LIGHT_GRAY, Color.YELLOW,
+                Color.DARK_GRAY, Color.PINK, Color.CYAN, Color.GRAY
+            };
+            for (int i = 0; i < config.playerCount; i++) {
+                gameState.players.add(
+                    new Player(config.playerNames[i], colors[i % colors.length])
+                );
+            }
+            gameState.status = GameStatus.RUNNING;
+        }
+ 
+        private void buildUI() {
+            boardPanel = new BoardPanel(board, gameState);
+            boardPanel.setPreferredSize(new Dimension(600, 600));
+ 
+            infoPanel  = new InfoPanel(gameState);
+            dicePanel  = new DicePanel(this);
+            statsPanel = new StatsPanel(gameState);
+            logPanel   = new LogPanel(gameState);
+ 
+            JPanel right = new JPanel();
+            right.setLayout(new BoxLayout(right, BoxLayout.Y_AXIS));
+            right.setPreferredSize(new Dimension(390, 700));
+            right.setBackground(new Color(245, 245, 245));
+            right.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+ 
+            right.add(infoPanel);
+            right.add(Box.createVerticalStrut(6));
+            right.add(dicePanel);
+            right.add(Box.createVerticalStrut(6));
+            right.add(statsPanel);
+            right.add(Box.createVerticalStrut(6));
+            right.add(logPanel);
+ 
+            add(boardPanel, BorderLayout.CENTER);
+            add(right,      BorderLayout.EAST);
+        }
+ 
+        // Dipanggil DicePanel saat tombol diklik, menerima hasil dadu dari animasi
+        public void playTurn(int diceValue) {
+            if (animationRunning) return;
+            if (gameState.status == GameStatus.FINISHED) return;
+ 
+            Player player = gameState.getCurrentPlayer();
+            int oldPos    = player.position;
+ 
+            player.turnCount++;
+ 
+            // Belum masuk papan — harus dapat 6
+            if (oldPos == 0) {
+                if (diceValue == 6) {
+                    player.position = 1;
+                    Move move = new Move(player, diceValue, 0, 1, 1, EffectType.NONE,
+                        player.name + " melempar " + diceValue + " -> masuk ke petak 1!");
+                    gameState.addMove(move);
+                    // Dapat 6 boleh lempar lagi, aktifkan tombol kembali
+                    refresh();
+                    dicePanel.setRollEnabled(true); // FIX: tombol aktif kembali
+                } else {
+                    Move move = new Move(player, diceValue, 0, 0, 0, EffectType.NONE,
+                        player.name + " melempar " + diceValue + " -> belum dapat angka 6");
+                    gameState.addMove(move);
+                    gameState.nextTurn();
+                    refresh();
+                    dicePanel.setRollEnabled(true); // FIX: tombol aktif kembali
+                }
+                return;
+            }
+ 
+            // Sudah di papan — hitung posisi baru
+            int targetPos = oldPos + diceValue;
+            if (targetPos > 100) targetPos = 100 - (targetPos - 100);
+ 
+            final int finalTarget = targetPos;
+ 
+            // Animasi pion bergerak petak per petak
+            animationRunning = true;
+            dicePanel.setRollEnabled(false);
+ 
+            javax.swing.Timer timer = new javax.swing.Timer(120, null);
+            timer.addActionListener(e -> {
+                if (player.position < finalTarget) {
+                    player.position++;
+                    boardPanel.repaint();
+                } else {
+                    timer.stop();
+                    animationRunning = false;
+ 
+                    EffectType effect = EffectType.NONE;
+                    String desc;
+ 
+                    if (board.isSnake(finalTarget)) {
+                        int dest = board.getDestination(finalTarget);
+                        desc = player.name + " melempar " + diceValue
+                             + " -> kena ular! " + finalTarget + " -> " + dest;
+                        player.position = dest;
+                        player.snakeHits++;
+                        effect = EffectType.SNAKE;
+                    } else if (board.isLadder(finalTarget)) {
+                        int dest = board.getDestination(finalTarget);
+                        desc = player.name + " melempar " + diceValue
+                             + " -> naik tangga! " + finalTarget + " -> " + dest;
+                        player.position = dest;
+                        player.ladderClimbs++;
+                        effect = EffectType.LADDER;
+                    } else {
+                        desc = player.name + " melempar " + diceValue
+                             + " -> maju ke petak " + finalTarget;
+                    }
+ 
+                    Move move = new Move(player, diceValue, oldPos,
+                                        finalTarget, player.position, effect, desc);
+                    gameState.addMove(move);
+ 
+                    // Cek menang
+                    if (player.position == 100) {
+                        player.winner      = true;
+                        gameState.winner   = player;
+                        gameState.status   = GameStatus.FINISHED;
+                        refresh();
+                        dicePanel.setRollEnabled(true); 
+                        
+                        new javax.swing.Timer(500, ev -> {
+                            ((javax.swing.Timer)ev.getSource()).stop();
+                            showWin(gameState, config);
+                        }).start();
+                        return;
+                    }
+ 
+                    if (diceValue != 6) {
+                        gameState.nextTurn();
+                    }
+ 
+                    refresh();
+                    dicePanel.setRollEnabled(true);
+                }
+            });
+            timer.start();
+        }
+ 
+        public void refresh() {
+            infoPanel.refresh();
+            statsPanel.refresh();
+            logPanel.refresh();
+            boardPanel.repaint();
+        }
+    }
+ 
+    // ============================================================
+    // GUI: BoardPanel
+    // ============================================================
+ 
+    static class BoardPanel extends JPanel {
+        Board board;
+        GameState gameState;
+        static final int CELL = 60;
+ 
+        public BoardPanel(Board board, GameState gameState) {
+            this.board     = board;
+            this.gameState = gameState;
+            setPreferredSize(new Dimension(600, 600));
+            setBackground(Color.WHITE);
+        }
+ 
+        @Override
+        protected void paintComponent(Graphics g) {
+            super.paintComponent(g);
+            Graphics2D g2 = (Graphics2D) g;
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                                RenderingHints.VALUE_ANTIALIAS_ON);
+            drawCells(g2);
+            drawLadders(g2);
+            drawSnakes(g2);
+            drawPlayers(g2);
+        }
+ 
+        private void drawCells(Graphics2D g2) {
+            for (int row = 0; row < 10; row++) {
+                for (int col = 0; col < 10; col++) {
+                    int number = (row % 2 == 0)
+                        ? row * 10 + col + 1
+                        : row * 10 + (10 - col);
+                    int x = col * CELL;
+                    int y = 600 - ((row + 1) * CELL);
+ 
+                    // Warna petak
+                    Color bg;
+                    if (board.isSnake(number))        bg = new Color(255, 160, 160);
+                    else if (board.isLadder(number))  bg = new Color(160, 230, 160);
+                    else if (number == 100)            bg = new Color(255, 215, 0);
+                    else bg = (number % 2 == 0) ? new Color(255, 255, 220) : Color.WHITE;
+ 
+                    g2.setColor(bg);
+                    g2.fillRect(x, y, CELL, CELL);
+ 
+                    // Border
+                    g2.setColor(new Color(180, 180, 180));
+                    g2.drawRect(x, y, CELL, CELL);
+ 
+                    // Nomor
+                    g2.setColor(Color.DARK_GRAY);
+                    g2.setFont(new Font("Arial", Font.BOLD, 10));
+                    g2.drawString(String.valueOf(number), x + 3, y + 13);
+ 
+                    // Label ular/tangga kecil
+                    if (board.isSnake(number)) {
+                        g2.setColor(new Color(180, 0, 0));
+                        g2.setFont(new Font("Arial", Font.PLAIN, 9));
+                        g2.drawString("->"+board.snakes.get(number), x + 3, y + CELL - 5);
+                    } else if (board.isLadder(number)) {
+                        g2.setColor(new Color(0, 120, 0));
+                        g2.setFont(new Font("Arial", Font.PLAIN, 9));
+                        g2.drawString("->"+board.ladders.get(number), x + 3, y + CELL - 5);
+                    }
+                }
+            }
+        }
+ 
+        private void drawLadders(Graphics2D g2) {
+            g2.setStroke(new BasicStroke(4f));
+            for (Map.Entry<Integer, Integer> e : board.ladders.entrySet()) {
+                Point pBot = board.getCenter(e.getKey());
+                Point pTop = board.getCenter(e.getValue());
+                int offset = 5;
+ 
+                g2.setColor(new Color(0, 150, 0));
+                g2.drawLine(pBot.x - offset, pBot.y, pTop.x - offset, pTop.y);
+                g2.drawLine(pBot.x + offset, pBot.y, pTop.x + offset, pTop.y);
+ 
+                g2.setStroke(new BasicStroke(2f));
+                g2.setColor(new Color(0, 200, 0));
+                for (int i = 0; i <= 4; i++) {
+                    float t  = (float) i / 4;
+                    int rx = (int)(pBot.x + t * (pTop.x - pBot.x));
+                    int ry = (int)(pBot.y + t * (pTop.y - pBot.y));
+                    g2.drawLine(rx - offset, ry, rx + offset, ry);
+                }
+                g2.setStroke(new BasicStroke(4f));
+            }
+            g2.setStroke(new BasicStroke(1f));
+        }
+ 
+        private void drawSnakes(Graphics2D g2) {
+            g2.setStroke(new BasicStroke(5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            for (Map.Entry<Integer, Integer> e : board.snakes.entrySet()) {
+                Point pHead = board.getCenter(e.getKey());
+                Point pTail = board.getCenter(e.getValue());
+                int cx = (pHead.x + pTail.x) / 2 + 25;
+                int cy = (pHead.y + pTail.y) / 2 - 25;
+ 
+                g2.setColor(new Color(200, 0, 0));
+                g2.draw(new QuadCurve2D.Float(pHead.x, pHead.y, cx, cy, pTail.x, pTail.y));
+ 
+                // Kepala ular
+                g2.setColor(new Color(140, 0, 0));
+                g2.fillOval(pHead.x - 7, pHead.y - 7, 14, 14);
+            }
+            g2.setStroke(new BasicStroke(1f));
+        }
+ 
+        private void drawPlayers(Graphics2D g2) {
+
+            int[][] offsets = {
+                {0,0},{-10,-10},{10,-10},{-10,10},{10,10},
+                {0,-14},{0,14},{-14,0},{14,0},{-7,-14},{7,-14},{0,18}
+            };
+ 
+            // Hitung berapa pemain di tiap posisi
+            Map<Integer, List<Player>> posMap = new LinkedHashMap<>();
+            for (Player p : gameState.players) {
+                posMap.computeIfAbsent(p.position, k -> new ArrayList<>()).add(p);
+            }
+ 
+            for (Map.Entry<Integer, List<Player>> entry : posMap.entrySet()) {
+                int pos = entry.getKey();
+                List<Player> here = entry.getValue();
+ 
+                if (pos == 0) {
+
+                    for (int i = 0; i < here.size(); i++) {
+                        drawPion(g2, 10 + i * 22, 585, here.get(i));
+                    }
+                } else {
+                    Point center = board.getCenter(pos);
+                    for (int i = 0; i < here.size(); i++) {
+                        int ox = (here.size() > 1 && i < offsets.length) ? offsets[i][0] : 0;
+                        int oy = (here.size() > 1 && i < offsets.length) ? offsets[i][1] : 0;
+                        drawPion(g2, center.x + ox, center.y + oy, here.get(i));
+                    }
+                }
+            }
+        }
+ 
+        private void drawPion(Graphics2D g2, int x, int y, Player p) {
+            int r = 10;
+            // Bayangan
+            g2.setColor(new Color(0,0,0,50));
+            g2.fillOval(x - r + 2, y - r + 2, r*2, r*2);
+            // Badan
+            g2.setColor(p.color);
+            g2.fillOval(x - r, y - r, r*2, r*2);
+            // Border
+            g2.setColor(p.color.darker());
+            g2.setStroke(new BasicStroke(2f));
+            g2.drawOval(x - r, y - r, r*2, r*2);
+            g2.setStroke(new BasicStroke(1f));
+            // Highlight
+            g2.setColor(new Color(255,255,255,100));
+            g2.fillOval(x - r + 2, y - r + 2, r - 2, r - 2);
+            // Inisial
+            g2.setColor(Color.WHITE);
+            g2.setFont(new Font("Arial", Font.BOLD, 9));
+            String ini = String.valueOf(p.name.charAt(0)).toUpperCase();
+            FontMetrics fm = g2.getFontMetrics();
+            g2.drawString(ini, x - fm.stringWidth(ini)/2, y + fm.getAscent()/2 - 1);
+        }
+    }
+ 
+    // ============================================================
+    // GUI: DicePanel
+    // ============================================================
+ 
+    static class DicePanel extends JPanel {
+        GamePanel gamePanel;
+        JButton   btnRoll;
+        DiceFace  diceFace;
+        javax.swing.Timer animTimer;
+        int animCount;
+ 
+        public DicePanel(GamePanel gamePanel) {
+            this.gamePanel = gamePanel;
+            setBackground(new Color(255, 250, 230));
+            setBorder(BorderFactory.createTitledBorder(
+                BorderFactory.createLineBorder(new Color(200,200,200)),
+                "Dadu", TitledBorder.LEFT, TitledBorder.TOP,
+                new Font("Arial", Font.BOLD, 13)));
+            setPreferredSize(new Dimension(380, 120));
+            setMaximumSize(new Dimension(Integer.MAX_VALUE, 120));
+            setLayout(new FlowLayout(FlowLayout.CENTER, 20, 12));
+ 
+            diceFace = new DiceFace(0);
+ 
+            btnRoll = new JButton("Lempar Dadu!");
+            btnRoll.setFont(new Font("Arial", Font.BOLD, 15));
+            btnRoll.setBackground(new Color(220, 50, 50));
+            btnRoll.setForeground(Color.WHITE);
+            btnRoll.setFocusPainted(false);
+            btnRoll.setBorderPainted(false);
+            btnRoll.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            btnRoll.setPreferredSize(new Dimension(150, 60));
+            btnRoll.addActionListener(e -> startRollAnimation());
+ 
+            add(diceFace);
+            add(btnRoll);
+        }
+ 
+        private void startRollAnimation() {
+            btnRoll.setEnabled(false);
+            animCount = 0;
+            final int realValue = gamePanel.dice.roll();
+            animTimer = new javax.swing.Timer(70, e -> {
+                if (animCount < 11) {
+                    diceFace.setValue(new Random().nextInt(6) + 1);
+                } else {
+                    diceFace.setValue(realValue);
+                    animTimer.stop();
+                    gamePanel.playTurn(realValue);
+                }
+                animCount++;
+            });
+            animTimer.start();
+        }
+ 
+        public void showValue(int val) { diceFace.setValue(val); }
+ 
+        public void setRollEnabled(boolean enabled) { btnRoll.setEnabled(enabled); }
+    }
+ 
+    // ============================================================
+    // GUI: DiceFace — visual titik dadu
+    // ============================================================
+ 
+    static class DiceFace extends JPanel {
+        private int value; 
+ 
+        private static final int[][][] DOT_POSITIONS = {
+            {},                                                         
+            {{1,1}},                                                     
+            {{0,0},{2,2}},                                               
+            {{0,0},{1,1},{2,2}},                                         
+            {{0,0},{0,2},{2,0},{2,2}},                                   
+            {{0,0},{0,2},{1,1},{2,0},{2,2}},                             
+            {{0,0},{0,2},{1,0},{1,2},{2,0},{2,2}}                        
+        };
+ 
+        public DiceFace(int value) {
+            this.value = value;
+            setPreferredSize(new Dimension(70, 70));
+            setOpaque(false);
+        }
+ 
+        public void setValue(int v) {
+            this.value = v;
+            repaint();
+        }
+ 
+        @Override
+        protected void paintComponent(Graphics g) {
+            super.paintComponent(g);
+            Graphics2D g2 = (Graphics2D) g;
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+ 
+            int size = 64;
+            int x0 = (getWidth()  - size) / 2;
+            int y0 = (getHeight() - size) / 2;
+            int arc = 12;
+ 
+            // Badan dadu
+            g2.setColor(Color.WHITE);
+            g2.fillRoundRect(x0, y0, size, size, arc, arc);
+            g2.setColor(new Color(180, 50, 50));
+            g2.setStroke(new BasicStroke(2.5f));
+            g2.drawRoundRect(x0, y0, size, size, arc, arc);
+ 
+            if (value == 0) {
+                g2.setColor(new Color(180, 50, 50));
+                g2.setFont(new Font("Arial", Font.BOLD, 28));
+                FontMetrics fm = g2.getFontMetrics();
+                g2.drawString("?", x0 + (size - fm.stringWidth("?")) / 2,
+                              y0 + (size + fm.getAscent()) / 2 - 4);
+                return;
+            }
+ 
+            // Gambar titik-titik
+            int dotR   = 6;
+            int margin = 12;
+            int step   = (size - 2 * margin - dotR * 2) / 2;
+ 
+            g2.setColor(new Color(180, 30, 30));
+            for (int[] pos : DOT_POSITIONS[value]) {
+                int col = pos[0]; 
+                int row = pos[1]; 
+                int cx = x0 + margin + dotR + col * step;
+                int cy = y0 + margin + dotR + row * step;
+                g2.fillOval(cx - dotR, cy - dotR, dotR * 2, dotR * 2);
+            }
+        }
+    }
+ 
+    // ============================================================
+    // GUI: InfoPanel
+    // ============================================================
+ 
+    static class InfoPanel extends JPanel {
+        GameState gameState;
+        JLabel lblGiliran, lblPosisi, lblTurn, lblRound;
+        JPanel indicator;
+        JPanel inner;
+ 
+        public InfoPanel(GameState gameState) {
+            this.gameState = gameState;
+            setLayout(new BorderLayout(0, 0));
+            setPreferredSize(new Dimension(380, 115));
+            setMaximumSize(new Dimension(Integer.MAX_VALUE, 115));
+            setOpaque(true);
+ 
+            indicator = new JPanel();
+            indicator.setPreferredSize(new Dimension(8, 0));
+            indicator.setOpaque(true);
+            add(indicator, BorderLayout.WEST);
+ 
+            inner = new JPanel(new GridLayout(4, 1, 2, 2));
+            inner.setOpaque(false);
+            inner.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 8));
+ 
+            lblGiliran = new JLabel(); lblGiliran.setFont(new Font("Arial", Font.BOLD, 14));
+            lblPosisi  = new JLabel(); lblPosisi .setFont(new Font("Arial", Font.PLAIN, 13));
+            lblTurn    = new JLabel(); lblTurn   .setFont(new Font("Arial", Font.PLAIN, 13));
+            lblRound   = new JLabel(); lblRound  .setFont(new Font("Arial", Font.PLAIN, 13));
+ 
+            inner.add(lblGiliran); inner.add(lblPosisi);
+            inner.add(lblTurn);    inner.add(lblRound);
+            add(inner, BorderLayout.CENTER);
+ 
+            refresh();
+        }
+ 
+        public void refresh() {
+            Player p = gameState.getCurrentPlayer();
+            Color  c = p.color;
+ 
+            setBackground(new Color(245, 245, 245));
+            setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createTitledBorder(
+                    BorderFactory.createLineBorder(c.darker(), 2),
+                    "Giliran Aktif", TitledBorder.LEFT, TitledBorder.TOP,
+                    new Font("Arial", Font.BOLD, 13), c.darker()),
+                BorderFactory.createEmptyBorder(0, 0, 0, 0)
+            ));
+ 
+            indicator.setBackground(c);
+ 
+            // Teks label
+            lblGiliran.setText("  \u25B6 " + p.name);
+            lblGiliran.setForeground(c.darker());
+            lblGiliran.setFont(new Font("Arial", Font.BOLD, 14));
+ 
+            lblPosisi.setText("  Posisi  : " +
+                (p.position == 0 ? "Belum masuk papan" : "Petak " + p.position));
+            lblPosisi.setForeground(Color.DARK_GRAY);
+ 
+            lblTurn.setText("  Turn ke : " + p.turnCount);
+            lblTurn.setForeground(Color.DARK_GRAY);
+ 
+            lblRound.setText("  Putaran : " + gameState.round);
+            lblRound.setForeground(Color.DARK_GRAY);
+ 
+            repaint();
+        }
+    }
+ 
+    // ============================================================
+    // GUI: StatsPanel
+    // ============================================================
+ 
+    static class StatsPanel extends JPanel {
+        GameState gameState;
+        JPanel content;
+ 
+        public StatsPanel(GameState gameState) {
+            this.gameState = gameState;
+            setBackground(new Color(255, 245, 230));
+            setBorder(BorderFactory.createTitledBorder(
+                BorderFactory.createLineBorder(new Color(220,200,180)),
+                "Statistik Pemain", TitledBorder.LEFT, TitledBorder.TOP,
+                new Font("Arial", Font.BOLD, 13)));
+            setLayout(new BorderLayout());
+            setPreferredSize(new Dimension(380, 130));
+            setMaximumSize(new Dimension(Integer.MAX_VALUE, 130));
+ 
+            content = new JPanel();
+            content.setOpaque(false);
+            content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
+ 
+            JScrollPane sp = new JScrollPane(content);
+            sp.setOpaque(false);
+            sp.getViewport().setOpaque(false);
+            sp.setBorder(null);
+            add(sp, BorderLayout.CENTER);
+ 
+            refresh();
+        }
+ 
+        public void refresh() {
+            content.removeAll();
+            for (Player p : gameState.players) {
+                JLabel lbl = new JLabel(
+                    "  " + p.name
+                    + "  |  Ular: " + p.snakeHits
+                    + "x   Tangga: " + p.ladderClimbs + "x"
+                    + "   Pos: " + p.position
+                );
+                lbl.setFont(new Font("Arial", Font.PLAIN, 12));
+                lbl.setForeground(p.color.darker());
+                content.add(lbl);
+            }
+            content.revalidate();
+            content.repaint();
+        }
+    }
+ 
+    // ============================================================
+    // GUI: LogPanel
+    // ============================================================
+ 
+    static class LogPanel extends JPanel {
+        GameState gameState;
+        DefaultListModel<String> listModel;
+        JList<String> list;
+ 
+        public LogPanel(GameState gameState) {
+            this.gameState = gameState;
+            setBackground(new Color(248, 248, 248));
+            setBorder(BorderFactory.createTitledBorder(
+                BorderFactory.createLineBorder(new Color(200,200,200)),
+                "Log Riwayat", TitledBorder.LEFT, TitledBorder.TOP,
+                new Font("Arial", Font.BOLD, 13)));
+            setLayout(new BorderLayout());
+ 
+            listModel = new DefaultListModel<>();
+            list = new JList<>(listModel);
+            list.setFont(new Font("Monospaced", Font.PLAIN, 11));
+            list.setBackground(new Color(252, 252, 252));
+ 
+            list.setCellRenderer((lst, value, index, isSelected, cellHasFocus) -> {
+                JLabel lbl = new JLabel(value);
+                lbl.setFont(new Font("Arial", Font.PLAIN, 11));
+                lbl.setBorder(BorderFactory.createEmptyBorder(1, 4, 1, 4));
+                if (value.contains("[ULAR]"))         lbl.setForeground(new Color(180,0,0));
+                else if (value.contains("[TANGGA]"))  lbl.setForeground(new Color(0,130,0));
+                else                                   lbl.setForeground(Color.DARK_GRAY);
+                lbl.setOpaque(true);
+                lbl.setBackground(isSelected ? new Color(220,230,255) : Color.WHITE);
+                return lbl;
+            });
+ 
+            JScrollPane sp = new JScrollPane(list);
+            add(sp, BorderLayout.CENTER);
+            refresh();
+        }
+ 
+        public void refresh() {
+            listModel.clear();
+            for (Move m : gameState.moveLog) {
+                String tag = "";
+                if (m.effectType == EffectType.SNAKE)  tag = " [ULAR]";
+                if (m.effectType == EffectType.LADDER)  tag = " [TANGGA]";
+                listModel.addElement(m.description + tag);
+            }
+        }
+    }
+ 
+    // ============================================================
+    // GUI: WinPanel (Layar Akhir Permainan)
+    // ============================================================
+ 
+    static class WinPanel extends JPanel {
+        JFrame frame;
+        GameState gameState;
+        GameConfig config;
+ 
+        public WinPanel(JFrame frame, GameState gameState, GameConfig config) {
+            this.frame     = frame;
+            this.gameState = gameState;
+            this.config    = config;
+            setLayout(new BorderLayout());
+            setBackground(new Color(34, 139, 34));
+            build();
+        }
+ 
+        private void build() {
+            Player winner = gameState.winner;
+ 
+            // Judul
+            JLabel lblWin = new JLabel("SELAMAT!", SwingConstants.CENTER);
+            lblWin.setFont(new Font("Arial", Font.BOLD, 56));
+            lblWin.setForeground(new Color(255, 215, 0));
+            lblWin.setBorder(BorderFactory.createEmptyBorder(80, 0, 10, 0));
+ 
+            JLabel lblName = new JLabel(winner.name + " MENANG!", SwingConstants.CENTER);
+            lblName.setFont(new Font("Arial", Font.BOLD, 32));
+            lblName.setForeground(Color.WHITE);
+ 
+            JLabel lblRound = new JLabel(
+                "Total Putaran : " + gameState.round +
+                "   |   Total Turn : " + winner.turnCount,
+                SwingConstants.CENTER);
+            lblRound.setFont(new Font("Arial", Font.PLAIN, 18));
+            lblRound.setForeground(new Color(255, 255, 180));
+            lblRound.setBorder(BorderFactory.createEmptyBorder(10, 0, 20, 0));
+ 
+            // Statistik semua pemain
+            JPanel statsBox = new JPanel(new GridLayout(0, 1, 2, 2));
+            statsBox.setOpaque(false);
+            statsBox.setBorder(BorderFactory.createEmptyBorder(0, 200, 10, 200));
+            for (Player p : gameState.players) {
+                JLabel sl = new JLabel(
+                    p.name + "  —  Ular: " + p.snakeHits +
+                    "x   Tangga: " + p.ladderClimbs + "x   Turn: " + p.turnCount,
+                    SwingConstants.CENTER);
+                sl.setFont(new Font("Arial", Font.PLAIN, 14));
+                sl.setForeground(p == winner ? new Color(255,215,0) : new Color(220,255,220));
+                statsBox.add(sl);
+            }
+ 
+            JPanel centerPanel = new JPanel(new BorderLayout());
+            centerPanel.setOpaque(false);
+            JPanel topInfo = new JPanel(new GridLayout(3, 1));
+            topInfo.setOpaque(false);
+            topInfo.add(lblWin); topInfo.add(lblName); topInfo.add(lblRound);
+            centerPanel.add(topInfo,   BorderLayout.NORTH);
+            centerPanel.add(statsBox,  BorderLayout.CENTER);
+ 
+            // Tombol
+            JButton btnRestart   = makeBtn("Main Lagi",    new Color(255, 200, 0));
+            JButton btnMainMenu  = makeBtn("Menu Utama",   new Color(70, 130, 180));
+            JButton btnExit      = makeBtn("Keluar",       new Color(200, 60, 60));
+ 
+            btnRestart.addActionListener(e -> showGame(config));
+            btnMainMenu.addActionListener(e -> {
+                mainFrame.setContentPane(new MainMenuPanel(frame));
+                mainFrame.revalidate(); mainFrame.repaint();
+            });
+            btnExit.addActionListener(e -> System.exit(0));
+ 
+            JPanel btnRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 20, 30));
+            btnRow.setOpaque(false);
+            btnRow.add(btnRestart); btnRow.add(btnMainMenu); btnRow.add(btnExit);
+ 
+            add(centerPanel, BorderLayout.CENTER);
+            add(btnRow,      BorderLayout.SOUTH);
+        }
+ 
+        private JButton makeBtn(String text, Color color) {
+            JButton b = new JButton(text);
+            b.setFont(new Font("Arial", Font.BOLD, 16));
+            b.setBackground(color); b.setForeground(Color.WHITE);
+            b.setFocusPainted(false); b.setBorderPainted(false);
+            b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            b.setPreferredSize(new Dimension(180, 50));
+            return b;
+        }
+    }
+    
+    public static void playBackgroundMusic(String fileName) {
+        stopBackgroundMusic(); // Matikan lagu sebelumnya agar tidak tumpang tindih
+        try {
+            java.net.URL soundURL = UAP_REVO2.class.getResource("/sound/" + fileName);
+            javax.sound.sampled.AudioInputStream audioStream;
+            
+            if (soundURL != null) {
+                audioStream = javax.sound.sampled.AudioSystem.getAudioInputStream(soundURL);
+            } else {
+                java.io.File soundFile = new java.io.File("sound/" + fileName);
+                if (soundFile.exists()) {
+                    audioStream = javax.sound.sampled.AudioSystem.getAudioInputStream(soundFile);
+                } else {
+                    System.out.println("File musik tidak ditemukan: " + fileName);
+                    return;
+                }
+            }
+            
+            backgroundMusic = javax.sound.sampled.AudioSystem.getClip();
+            backgroundMusic.open(audioStream);
+            backgroundMusic.loop(javax.sound.sampled.Clip.LOOP_CONTINUOUSLY); // Mengulang terus
+            backgroundMusic.start();
+        } catch (Exception e) {
+            System.out.println("Gagal memutar musik: " + e.getMessage());
+        }
+    }
+
+    public static void stopBackgroundMusic() {
+        if (backgroundMusic != null && backgroundMusic.isRunning()) {
+            backgroundMusic.stop();
+            backgroundMusic.close();
+        }
+    }
+}
+    
+
