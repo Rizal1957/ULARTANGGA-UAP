@@ -15,10 +15,7 @@ public class UAP_REVO2 {
     static JFrame mainFrame;
     public static JCheckBox chkSoundGlobal; // Untuk menyimpan status sound secara global
     public static javax.sound.sampled.Clip backgroundMusic;
-// ============================================================
-    // ENUM
-    // ============================================================
- 
+
     enum CellType {
         NORMAL, SNAKE_HEAD, SNAKE_TAIL, LADDER_START, LADDER_END
     }
@@ -30,10 +27,6 @@ public class UAP_REVO2 {
     enum EffectType {
         NONE, SNAKE, LADDER
     }
- 
-    // ============================================================
-    // MODEL: Player
-    // ============================================================
  
     static class Player {
         String name;
